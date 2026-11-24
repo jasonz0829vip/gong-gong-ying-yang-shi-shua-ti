@@ -50,6 +50,8 @@ h2{font-size:17px;margin:0}
 .mode.primary{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 .mode.primary span{color:var(--brand-ink);opacity:.85}
 .mode .badge{display:inline-block;background:var(--bad);color:#fff;border-radius:999px;font-size:12px;padding:0 7px;line-height:20px;margin-left:6px;vertical-align:2px}
+.mode.recite{width:100%;margin-top:10px;background:var(--brand-soft);border-color:var(--brand)}
+.mode.recite b{color:var(--brand)}
 .sec-title{margin:22px 2px 10px;font-size:15px;color:var(--ink2);font-weight:600}
 .bankrow{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:8px;width:100%;text-align:left;box-shadow:var(--shadow)}
 .bankrow .grow{flex:1}
@@ -173,9 +175,13 @@ h2{font-size:17px;margin:0}
       <button class="mode" id="m-exam"><b>模拟考试</b><span>计时计分，交卷后统一看解析</span></button>
       <button class="mode" id="m-fav"><b>我的收藏</b><span>收藏的题目单独练</span></button>
     </div>
+    <button class="mode recite" id="m-recite"><b>背题模式</b><span>答案直接高亮，不用点选，翻页背诵</span></button>
 
     <div class="sec-title">专项练习（按题库）</div>
     <div id="bank-list"></div>
+
+    <div class="sec-title">背题（按题库）</div>
+    <div id="recite-list"></div>
 
     <div class="sec-title">记录</div>
     <div class="linkrow">
@@ -457,6 +463,20 @@ function renderHome() {
     btn.addEventListener("click", () => startPractice({ mode: "seq", bank: bk }));
     list.appendChild(btn);
   });
+  const rlist = document.getElementById("recite-list");
+  rlist.innerHTML = "";
+  BANK_KEYS.forEach(bk => {
+    const st = bankStats(bk);
+    const sess = S.sess["recite-" + bk];
+    const pos = sess && typeof sess.i === "number" ? Math.min(sess.i, st.total - 1) + 1 : 0;
+    const btn = document.createElement("button");
+    btn.className = "bankrow";
+    btn.innerHTML = '<div class="grow"><b></b><div class="small">答案直接高亮，翻页背诵</div></div>' +
+      '<div class="pct">' + (pos ? "背到第 " + pos + " 题" : "共 " + st.total + " 题") + "</div>";
+    btn.querySelector("b").textContent = BANKS[bk].name;
+    btn.addEventListener("click", () => startPractice({ mode: "recite", bank: bk }));
+    rlist.appendChild(btn);
+  });
 }
 
 /* ================= 会话（答题流程） ================= */
@@ -492,6 +512,11 @@ function startPractice(opts) {
     ids = dueIds();
     title = "到期复习";
     sessKey = null;
+  } else if (opts.mode === "recite") {
+    const pool = opts.bank ? QUESTIONS.filter(q => q.b === opts.bank) : QUESTIONS;
+    ids = pool.map(q => q.id);
+    title = (opts.bank ? BANKS[opts.bank].name : "全部题库") + " · 背题模式";
+    sessKey = "recite-" + (opts.bank || "all");
   }
   if (!ids.length) { showList(opts.mode === "wrong" ? "wrong-empty" : opts.mode === "fav" ? "fav-empty" : "review-empty"); return; }
   cur = { kind: "practice", mode: opts.mode, bank: opts.bank || null, ids, i: 0, ans: {}, judged: {}, sessKey, title };
@@ -512,8 +537,9 @@ function renderQ() {
   sel = cur.ans[q.id] ? [...cur.ans[q.id]] : [];
   const judged = cur.kind === "practice" && !!cur.judged[q.id];
   const examDone = cur.kind === "exam" && cur.submitted;
-  const showFeedback = judged || examDone;
-  const myOk = showFeedback ? isCorrect(q, cur.ans[q.id] || []) : null;
+  const reciting = cur.kind === "practice" && cur.mode === "recite";
+  const showFeedback = judged || examDone || reciting;
+  const myOk = showFeedback && !reciting ? isCorrect(q, cur.ans[q.id] || []) : null;
 
   $("q-title").textContent = cur.title;
   $("q-count").textContent = (cur.i + 1) + "/" + cur.ids.length;
@@ -556,9 +582,14 @@ function renderQ() {
   const v = $("q-verdict"), e = $("q-expl");
   if (showFeedback) {
     v.classList.remove("hidden");
-    v.className = "verdict " + (myOk ? "ok" : "bad");
-    v.innerHTML = myOk ? "<b>✓ 回答正确</b>" :
-      "<b>✗ 回答错误</b><br>正确答案：" + q.a.join("、") + (cur.kind === "practice" && rec(q.id).wrong ? "<br>已加入错题本，答对一次即可移出。" : "");
+    if (reciting) {
+      v.className = "verdict ok";
+      v.innerHTML = "<b>正确答案：" + q.a.join("、") + "</b>";
+    } else {
+      v.className = "verdict " + (myOk ? "ok" : "bad");
+      v.innerHTML = myOk ? "<b>✓ 回答正确</b>" :
+        "<b>✗ 回答错误</b><br>正确答案：" + q.a.join("、") + (cur.kind === "practice" && rec(q.id).wrong ? "<br>已加入错题本，答对一次即可移出。" : "");
+    }
     e.classList.remove("hidden");
     if (q.e) {
       e.innerHTML = '<div class="lab">解析</div><div class="et"></div><div class="src"></div>';
@@ -571,6 +602,7 @@ function renderQ() {
 }
 
 function pickOption(q, k) {
+  if (cur.mode === "recite") return;
   const judged = cur.kind === "practice" && cur.judged[q.id];
   if (judged || (cur.kind === "exam" && cur.submitted)) return;
   if (q.t === "single") {
@@ -1035,6 +1067,7 @@ $("m-wrong").addEventListener("click", () => startPractice({ mode: "wrong" }));
 $("m-review").addEventListener("click", () => startPractice({ mode: "review" }));
 $("m-exam").addEventListener("click", () => show("v-exampick"));
 $("m-fav").addEventListener("click", () => startPractice({ mode: "fav" }));
+$("m-recite").addEventListener("click", () => startPractice({ mode: "recite", bank: null }));
 $("m-conq").addEventListener("click", () => showList("conq"));
 $("m-stats").addEventListener("click", () => showList("stats"));
 $("m-examlog").addEventListener("click", () => showList("examlog"));
