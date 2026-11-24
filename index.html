@@ -77,6 +77,7 @@ h2{font-size:17px;margin:0}
 .profadd{display:flex;gap:8px}
 .profadd input{flex:1;min-width:0;font:inherit;font-size:16px;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)}
 .profedit{flex:1;min-width:0;font:inherit;font-size:16px;padding:10px 12px;border:1.5px solid var(--brand);border-radius:10px;background:var(--card);color:var(--ink)}
+.backup-ta{width:100%;font:inherit;font-size:13px;line-height:1.6;padding:12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);resize:vertical;word-break:break-all}
 
 /* ---------- quiz ---------- */
 .qhead{position:sticky;top:0;background:var(--bg);padding:10px 0 8px;z-index:5}
@@ -181,8 +182,9 @@ h2{font-size:17px;margin:0}
       <button class="linkbtn" id="m-conq">已攻克错题</button>
       <button class="linkbtn" id="m-stats">答题统计</button>
       <button class="linkbtn" id="m-examlog">考试记录</button>
+      <button class="linkbtn" id="m-backup">备份导出/导入</button>
     </div>
-    <p class="notice">题目来源：上海交通大学医学院公共营养师培训内部资料，仅供个人学习，请勿外传。<br>进度、错题与收藏按档案保存在本机浏览器中，多人共用一部手机时切换档案即可互不影响；换设备或清理浏览器数据后会丢失。</p>
+    <p class="notice">题目来源：上海交通大学医学院公共营养师培训内部资料，仅供个人学习，请勿外传。<br>进度、错题与收藏按档案保存在本机浏览器中，多人共用一部手机时切换档案即可互不影响；换设备或清理浏览器数据后会丢失，建议在「备份导出/导入」里定期导出一份存好，清了也能导回来。</p>
   </section>
 
   <!-- ======== 档案 ======== -->
@@ -198,6 +200,9 @@ h2{font-size:17px;margin:0}
       <button class="btn main" id="prof-add" style="flex:0 0 auto;padding:13px 20px">新建</button>
     </div>
     <p class="small" style="margin-top:10px;line-height:1.7">新建后会自动切换到新档案。档案只保存在本机浏览器中。</p>
+    <div class="sec-title">数据备份</div>
+    <button class="linkbtn" id="prof-backup">导出 / 导入全部档案备份</button>
+    <p class="small" style="margin-top:10px;line-height:1.7">导出会把全部档案的进度、错题、收藏和考试记录打包成一个文件；换手机或清了浏览器数据后，用导入就能恢复。</p>
   </section>
 
   <!-- ======== 选考试 ======== -->
@@ -286,6 +291,8 @@ h2{font-size:17px;margin:0}
   </div>
 </div>
 
+<input type="file" id="backup-file" accept=".json,application/json" class="hidden">
+
 <!-- 确认框 -->
 <div class="confirm hidden" id="confirm">
   <div class="box">
@@ -335,6 +342,14 @@ function loadState() {
   } catch (e) {}
   return { rec: {}, conq: [], sess: {}, exams: [] };
 }
+// 一次性迁移：旧版 GitHub Pages 用 yyqs_v1 存进度，新版默认档案用 ggnutrition_quiz_v1。
+// 若新键为空且旧键有数据，复制一次（旧键保留不动，不删）。
+try {
+  if (!localStorage.getItem(LS_KEY)) {
+    const _old = localStorage.getItem("yyqs_v1");
+    if (_old) localStorage.setItem(LS_KEY, _old);
+  }
+} catch (e) {}
 let S = loadState();
 function save() { try { localStorage.setItem(stateKey(PROFILES.active), JSON.stringify(S)); } catch (e) {} }
 function rec(id) {
@@ -739,11 +754,42 @@ function showList(which) {
     const favs = favIds().length;
     html += '<div class="listrow"><div class="grow"><b>收藏</b><div class="small">共收藏 ' + favs + ' 道题</div></div></div>';
     html += '<div class="listrow"><div class="grow"><b>已攻克</b><div class="small">累计攻克错题 ' + S.conq.length + ' 道</div></div></div>';
+    html += '<button class="btn" id="btn-tobackup" style="width:100%;margin-top:14px">备份导出 / 导入（全部档案）</button>';
     html += '<button class="btn" id="btn-reset" style="width:100%;margin-top:14px;color:var(--bad)">清空当前档案的全部记录（进度、错题、收藏）</button>';
     body.innerHTML = html;
     $("btn-reset").addEventListener("click", () => flashConfirm("确定要清空档案「" + activeProfile().name + "」的全部答题记录吗？其他档案不受影响。此操作不可恢复。", () => {
       S = { rec: {}, conq: [], sess: {}, exams: [] }; save(); show("v-home");
     }));
+    $("btn-tobackup").addEventListener("click", () => showList("backup"));
+  } else if (which === "backup") {
+    t.textContent = "备份导出 / 导入";
+    save();
+    let profCount = PROFILES.list.length, doneAll = 0, examAll = 0;
+    PROFILES.list.forEach(pr => {
+      const st = readProfileState(pr.id);
+      Object.values(st.rec || {}).forEach(x => { if (x.a > 0) doneAll++; });
+      examAll += (st.exams || []).length;
+    });
+    let html = "";
+    html += '<div class="listrow"><div class="grow"><b>当前数据</b><div class="small">共 ' + profCount + ' 个档案 · 已练 ' + doneAll + ' 题 · 考试记录 ' + examAll + ' 条。导出会把全部档案一起打包。</div></div></div>';
+    html += '<button class="btn main" id="bk-dl" style="width:100%;margin-top:6px">下载备份文件</button>';
+    html += '<button class="btn" id="bk-copy" style="width:100%;margin-top:10px">复制备份文本</button>';
+    html += '<div class="sec-title">备份文本</div>';
+    html += '<textarea class="backup-ta" id="bk-text" rows="6" placeholder="备份文本会显示在这里；导入时也可以把备份文本粘贴到这里"></textarea>';
+    html += '<div class="sec-title">导入恢复</div>';
+    html += '<button class="btn" id="bk-file" style="width:100%">选择备份文件导入</button>';
+    html += '<button class="btn main" id="bk-import" style="width:100%;margin-top:10px">用上方文本导入</button>';
+    html += '<p class="small" style="margin-top:12px;line-height:1.8">导入会用备份覆盖现在的全部档案记录，导入前会先让你确认。微信里下载不了文件时，用「复制备份文本」把文本存到备忘录或文件传输助手，恢复时粘贴回来导入即可。</p>';
+    body.innerHTML = html;
+    $("bk-text").value = JSON.stringify(buildBackup());
+    $("bk-dl").addEventListener("click", downloadBackup);
+    $("bk-copy").addEventListener("click", copyBackupText);
+    $("bk-file").addEventListener("click", () => $("backup-file").click());
+    $("bk-import").addEventListener("click", () => {
+      const txt = $("bk-text").value.trim();
+      if (!txt) { flashConfirm("先把备份文本粘贴到文本框里，或用「选择备份文件导入」。"); return; }
+      importFromText(txt);
+    });
   } else if (which === "examlog") {
     t.textContent = "考试记录";
     if (!S.exams.length) {
@@ -764,6 +810,134 @@ function showList(which) {
   }
   show("v-list");
 }
+
+/* ================= 备份导出 / 导入 ================= */
+function emptyState() { return { rec: {}, conq: [], sess: {}, exams: [] }; }
+function readProfileState(id) {
+  if (id === PROFILES.active) { save(); return JSON.parse(JSON.stringify(S)); }
+  try { const s = JSON.parse(localStorage.getItem(stateKey(id)) || "null"); if (s && s.rec) return s; } catch (e) {}
+  return emptyState();
+}
+function sanitizeState(s) {
+  if (!s || typeof s !== "object") return emptyState();
+  return {
+    rec: (s.rec && typeof s.rec === "object" && !Array.isArray(s.rec)) ? s.rec : {},
+    conq: Array.isArray(s.conq) ? s.conq : [],
+    sess: (s.sess && typeof s.sess === "object" && !Array.isArray(s.sess)) ? s.sess : {},
+    exams: Array.isArray(s.exams) ? s.exams : []
+  };
+}
+function buildBackup() {
+  save();
+  const states = {};
+  PROFILES.list.forEach(pr => { states[pr.id] = readProfileState(pr.id); });
+  return {
+    app: "ggnutrition-quiz-backup", version: 1, exportedAt: new Date().toISOString(),
+    profiles: { list: PROFILES.list.map(pr => ({ id: pr.id, name: pr.name })), active: PROFILES.active },
+    states
+  };
+}
+function backupSummaryOf(profiles, states) {
+  let done = 0, exams = 0;
+  profiles.forEach(pr => {
+    const st = states[pr.id]; if (!st || !st.rec) return;
+    Object.values(st.rec).forEach(x => { if (x && x.a > 0) done++; });
+    exams += Array.isArray(st.exams) ? st.exams.length : 0;
+  });
+  return "这份备份包含 " + profiles.length + " 个档案（" + profiles.map(pr => pr.name).join("、") + "），已练 " + done + " 题、考试记录 " + exams + " 条";
+}
+function parseBackup(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { throw new Error("备份内容不是有效的备份文件，检查一下是不是复制全了。"); }
+  if (!obj || typeof obj !== "object") throw new Error("备份内容不对，无法导入。");
+  // 兼容只含单个档案记录的旧格式
+  if (!obj.profiles && obj.rec && typeof obj.rec === "object") {
+    const st = sanitizeState(obj);
+    let done = 0;
+    Object.values(st.rec).forEach(x => { if (x && x.a > 0) done++; });
+    return { kind: "single", state: st, summary: "这份备份是单个档案的记录（已练 " + done + " 题），将导入到当前档案「" + activeProfile().name + "」" };
+  }
+  if (!obj.profiles || !Array.isArray(obj.profiles.list) || !obj.profiles.list.length || !obj.states || typeof obj.states !== "object") {
+    throw new Error("这不是刷题软件的备份文件，无法导入。");
+  }
+  const seen = {}, list = [];
+  obj.profiles.list.forEach(pr => {
+    if (!pr || typeof pr.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(pr.id) || seen[pr.id]) return;
+    const nm = typeof pr.name === "string" && pr.name.trim() ? pr.name.trim().slice(0, 12) : "未命名档案";
+    seen[pr.id] = true;
+    list.push({ id: pr.id, name: nm });
+  });
+  if (!list.length) throw new Error("备份里没有可用的档案，无法导入。");
+  const states = {};
+  list.forEach(pr => { states[pr.id] = sanitizeState(obj.states[pr.id]); });
+  const active = list.some(pr => pr.id === obj.profiles.active) ? obj.profiles.active : list[0].id;
+  return { kind: "full", list, active, states, summary: backupSummaryOf(list, states) };
+}
+let pendingImport = null;
+function applyImport(parsed) {
+  if (parsed.kind === "single") {
+    try { localStorage.setItem(stateKey(PROFILES.active), JSON.stringify(parsed.state)); } catch (e) {}
+    S = loadState(); cur = null;
+    return;
+  }
+  const oldIds = PROFILES.list.map(pr => pr.id);
+  oldIds.forEach(id => { if (!parsed.list.some(pr => pr.id === id)) { try { localStorage.removeItem(stateKey(id)); } catch (e) {} } });
+  PROFILES = { list: parsed.list.slice(0, 20), active: parsed.active };
+  saveProfiles();
+  PROFILES.list.forEach(pr => { try { localStorage.setItem(stateKey(pr.id), JSON.stringify(parsed.states[pr.id] || emptyState())); } catch (e) {} });
+  S = loadState(); cur = null; profEditing = null;
+}
+function importFromText(text) {
+  let parsed;
+  try { parsed = parseBackup(text); } catch (e) { flashConfirm(e.message); return; }
+  pendingImport = parsed;
+  flashConfirm(parsed.summary + "。导入会覆盖现在的记录，确定导入吗？", () => {
+    const pi = pendingImport; pendingImport = null;
+    if (!pi) return;
+    applyImport(pi);
+    show("v-home");
+    flashConfirm("导入成功，已恢复到备份时的状态。");
+  });
+}
+function downloadBackup() {
+  const text = JSON.stringify(buildBackup());
+  const ta = $("bk-text"); if (ta) ta.value = text;
+  try {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const d = new Date(), pad = n => String(n).padStart(2, "0");
+    a.href = url;
+    a.download = "ggnutrition-backup-" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes()) + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    flashConfirm("备份文件已开始下载。如果在微信里没下载成功，改用「复制备份文本」，把文本存到备忘录或发给自己，导入时粘贴回来即可。");
+  } catch (e) {
+    flashConfirm("这个浏览器不让直接下载，请用「复制备份文本」保存备份文本。");
+  }
+}
+function copyBackupText() {
+  const ta = $("bk-text"); if (!ta) return;
+  ta.value = JSON.stringify(buildBackup());
+  ta.focus(); ta.select();
+  const done = () => flashConfirm("备份文本已复制。把它存到备忘录或发给自己保管；要恢复时回到这里，粘贴到文本框点「用上方文本导入」。");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done, () => { try { document.execCommand("copy"); } catch (e) {} done(); });
+  } else { try { document.execCommand("copy"); } catch (e) {} done(); }
+}
+$("backup-file").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const txt = String(rd.result || "");
+    const ta = $("bk-text"); if (ta) ta.value = txt;
+    importFromText(txt);
+  };
+  rd.onerror = () => flashConfirm("备份文件读取失败，换个文件再试。");
+  rd.readAsText(f);
+});
 
 /* ================= 档案切换 ================= */
 let profEditing = null;
@@ -864,6 +1038,8 @@ $("m-fav").addEventListener("click", () => startPractice({ mode: "fav" }));
 $("m-conq").addEventListener("click", () => showList("conq"));
 $("m-stats").addEventListener("click", () => showList("stats"));
 $("m-examlog").addEventListener("click", () => showList("examlog"));
+$("m-backup").addEventListener("click", () => showList("backup"));
+$("prof-backup").addEventListener("click", () => showList("backup"));
 
 renderHome();
 
